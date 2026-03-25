@@ -4,6 +4,20 @@ Convert raw EVM calldata to human-readable output using [ERC-7730](https://githu
 
 > Most of this was written by AI and has not been thoroughly vetted. Please use devcontainers and other methods to isolate your environment before running.
 
+## What works and what doesn't
+
+| Scenario | Status | Notes |
+|----------|--------|-------|
+| ERC-20 transfer/approve | ✅ | Generic descriptor, works on any token |
+| Aave v3 supply/borrow/repay | ✅ | Mainnet, zkSync, Polygon, and more |
+| Safe `execTransaction` → single call | ✅ | Inner calldata recursively decoded |
+| Safe `execTransaction` → Aave supply | ✅ | Nested: Safe layer + Aave layer both decoded |
+| Safe `execTransaction` → MultiSend | ❌ | Safe layer decodes, but MultiSend inner blob is raw hex |
+| Uniswap Universal Router `execute` | ❌ | No descriptor in the ERC-7730 registry |
+| Any protocol with custom packed encoding | ❌ | ERC-7730 `calldata` format only handles standard ABI |
+
+**Why the gaps?** The ERC-7730 schema's `calldata` format works when the inner bytes are standard ABI-encoded function calls. MultiSend and Uniswap Universal Router use custom packed encodings that the schema can't describe. See the [CLI examples](#cli-examples) below for what each case looks like.
+
 ## Setup
 
 ```bash
