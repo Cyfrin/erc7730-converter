@@ -13,3 +13,4 @@ wheels/
 *.local.*
 clear-signing-erc7730-registry/
 .claude/
+zksync-upgrade-verification/

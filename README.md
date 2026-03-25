@@ -6,17 +6,23 @@ Convert raw EVM calldata to human-readable output using [ERC-7730](https://githu
 
 ## What works and what doesn't
 
-| Scenario | Status | Notes |
-|----------|--------|-------|
-| ERC-20 transfer/approve | ✅ | Generic descriptor, works on any token |
-| Aave v3 supply/borrow/repay | ✅ | Mainnet, zkSync, Polygon, and more |
-| Safe `execTransaction` → single call | ✅ | Inner calldata recursively decoded |
-| Safe `execTransaction` → Aave supply | ✅ | Nested: Safe layer + Aave layer both decoded |
-| Safe `execTransaction` → MultiSend | ❌ | Safe layer decodes, but MultiSend inner blob is raw hex |
-| Uniswap Universal Router `execute` | ❌ | No descriptor in the ERC-7730 registry |
-| Any protocol with custom packed encoding | ❌ | ERC-7730 `calldata` format only handles standard ABI |
+| Scenario                              | Status | Why                                          |
+| ------------------------------------- | ------ | -------------------------------------------- |
+| ERC-20 transfer/approve               | ✅      | Generic descriptor, works on any token       |
+| Aave v3 supply/borrow/repay           | ✅      | Mainnet, zkSync, Polygon, and more           |
+| Safe `execTransaction` → single call  | ✅      | Inner calldata recursively decoded           |
+| Safe `execTransaction` → Aave supply  | ✅      | Nested: Safe layer + Aave layer both decoded |
+| zkSync `requestL2Transaction` (L1→L2) | ❌      | Missing descriptor from registry             |
+| Safe `execTransaction` → MultiSend    | ❌      | Custom packed encoding                       |
+| zkSync `sendToL1` (L2→L1 governance)  | ❌      | Custom packed encoding                       |
+| Uniswap Universal Router `execute`    | ❌      | Custom packed encoding                       |
 
-**Why the gaps?** The ERC-7730 schema's `calldata` format works when the inner bytes are standard ABI-encoded function calls. MultiSend and Uniswap Universal Router use custom packed encodings that the schema can't describe. See the [CLI examples](#cli-examples) below for what each case looks like.
+**Why the gaps?** The ERC-7730 `calldata` format recursively decodes inner calls when they are standard ABI (4-byte selector + encoded params). Three different failure modes exist:
+
+1. **Missing descriptor** — the encoding is standard ABI but no one has written a descriptor yet (e.g., zkSync `requestL2Transaction`). Fixable by adding a descriptor to the registry.
+2. **Custom packed encoding** — the bytes use a protocol-specific binary format that doesn't map to ABI types at all (e.g., MultiSend, Uniswap Universal Router). The ERC-7730 schema can't describe these.
+
+See the [CLI examples](#cli-examples) below for what each case looks like.
 
 ## Setup
 
@@ -204,6 +210,24 @@ Function: execTransaction(address,uint256,bytes,uint8,uint256,uint256,uint256,ad
 
 The `Transaction` field is raw hex because MultiSend uses a custom packed encoding (not standard ABI). The ERC-7730 `calldata` format only handles standard ABI-encoded inner calls.
 
+### zkSync Era `requestL2Transaction` (no descriptor)
+
+An L1→L2 message via the zkSync Era Mailbox calling `grantRole` on an L2 contract. From a real [governance upgrade proposal](https://github.com/nicholaspai/zksync-upgrade-verification).
+
+[View calldata on Cyfrin](https://tools.cyfrin.io/abi-encoding?data=0xeb6724190000000000000000000000005a7d6b2f92c77fad6ccabd7ee0624e64907eaf3e000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e00000000000000000000000000000000000000000000000000000000000989680000000000000000000000000000000000000000000000000000000000000032000000000000000000000000000000000000000000000000000000000000001600000000000000000000000001804c8ab1f12e6bbf3894d4083f33e07309d1f3800000000000000000000000000000000000000000000000000000000000000442f2ff15d0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f41eca3047b37dc7d88849de4a4dc07937ad6bc4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000)
+
+```bash
+uv run erc7730 translate \
+  0xeb6724190000000000000000000000005a7d6b2f92c77fad6ccabd7ee0624e64907eaf3e000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e00000000000000000000000000000000000000000000000000000000000989680000000000000000000000000000000000000000000000000000000000000032000000000000000000000000000000000000000000000000000000000000001600000000000000000000000001804c8ab1f12e6bbf3894d4083f33e07309d1f3800000000000000000000000000000000000000000000000000000000000000442f2ff15d0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f41eca3047b37dc7d88849de4a4dc07937ad6bc4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 \
+  --to 0x32400084C286CF3E17e7B677ea9583e60a000324 \
+  --chain-id 1 \
+  --registry-path clear-signing-erc7730-registry
+```
+
+```
+Error: No ERC-7730 descriptor found for selector 0xeb672419 on 0x32400084C286CF3E17e7B677ea9583e60a000324 (chain 1)
+```
+
 ### Uniswap Universal Router (no descriptor)
 
 The Universal Router's `execute(bytes,bytes[],uint256)` uses a custom command encoding not in the ERC-7730 registry.
@@ -220,4 +244,22 @@ uv run erc7730 translate \
 
 ```
 Error: No ERC-7730 descriptor found for selector 0x3593564c on 0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD (chain 1)
+```
+
+### zkSync `sendToL1` L2→L1 governance call (implicit selector)
+
+An L2→L1 message via the zkSync L1Messenger system contract (`0x...8008`). The inner bytes are an ABI-encoded `UpgradeProposal` struct — but **without a function selector**. The L1 `ProtocolUpgradeHandler` implicitly knows to call `execute()` with those bytes. This example wraps an inner `transferOwnership` call targeting an L1 contract.
+
+[View calldata on Cyfrin](https://tools.cyfrin.io/abi-encoding?data=0x62f84b24000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000001600000000000000000000000000000000000000000000000000000000000000060000000000000000000000000defd1edee3e8c5965216bd59c866f7f5307c9b29646563656e7472616c697a6174696f6e206973206e6f74206f7074696f6e616c00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000020000000000000000000000000c2a36181fb524a6befe639afed37a67e77d62cf1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000024f2fde38b000000000000000000000000e30dca3047b37dc7d88849de4a4dc07937ad5ab300000000000000000000000000000000000000000000000000000000)
+
+```bash
+uv run erc7730 translate \
+  0x62f84b24000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000001600000000000000000000000000000000000000000000000000000000000000060000000000000000000000000defd1edee3e8c5965216bd59c866f7f5307c9b29646563656e7472616c697a6174696f6e206973206e6f74206f7074696f6e616c00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000020000000000000000000000000c2a36181fb524a6befe639afed37a67e77d62cf1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000024f2fde38b000000000000000000000000e30dca3047b37dc7d88849de4a4dc07937ad5ab300000000000000000000000000000000000000000000000000000000 \
+  --to 0x0000000000000000000000000000000000008008 \
+  --chain-id 324 \
+  --registry-path clear-signing-erc7730-registry
+```
+
+```
+Error: No ERC-7730 descriptor found for selector 0x62f84b24 on 0x0000000000000000000000000000000000008008 (chain 324)
 ```
