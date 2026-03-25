@@ -87,5 +87,5 @@ def _split_params(params_str: str) -> list[str]:
 
 def hex_to_bytes(hex_str: str) -> bytes:
     """Convert a hex string (with or without 0x prefix) to bytes."""
-    clean = hex_str.removeprefix("0x").removeprefix("0X")
+    clean = hex_str.strip().removeprefix("0x").removeprefix("0X")
     return bytes.fromhex(clean)
