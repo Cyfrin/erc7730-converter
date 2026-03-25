@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from erc7730._abi import _split_params as _split_signature_params
 from erc7730._abi import (
     canonical_signature,
     canonical_type,
@@ -11,7 +12,6 @@ from erc7730._abi import (
     function_selector,
     parse_display_signature,
 )
-from erc7730._abi import _split_params as _split_signature_params
 from erc7730._models import FunctionFormat
 
 
